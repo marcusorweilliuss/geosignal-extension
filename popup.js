@@ -9,6 +9,9 @@ const FEED_CACHE_KEY = 'gs_feed_cache';
 const FEED_FILTERS_KEY = 'gs_feed_filters';
 const FEED_CACHE_TTL = 10 * 60 * 1000; // 10 min
 
+// GeoSignal web app — Clerk session lives here; cookie sync target.
+const GEOSIGNAL_WEB_URL = 'https://geosignal-6ics.onrender.com';
+
 const SECTORS = [
   'Geopolitics', 'Economy & Trade', 'Technology & AI', 'Climate & Energy',
   'Defence & Security', 'Society & Culture', 'Space & Frontier', 'Health & Biotech'
@@ -40,6 +43,9 @@ const REGION_LABELS = {
 // ── Boot ──
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Auth row is independent of onboarding — render it every open.
+  initAuthRow();
+
   // Check if this is the very first time the extension is opened.
   const { gs_first_install_seen } = await chrome.storage.local.get('gs_first_install_seen');
 
@@ -79,6 +85,64 @@ document.addEventListener('DOMContentLoaded', async () => {
     showMainView(state, pageActive);
   }
 });
+
+// ── Auth (Clerk session bridge with web app) ──
+// We can't run Clerk's JS SDK inside the popup (CSP + no bundler), so we
+// read the __session cookie that Clerk sets on the geosignal-6ics domain.
+// Presence = signed in on the web app. To sign out, the user does it on
+// the web app — we just reflect what the cookie says.
+
+async function readClerkSession() {
+  try {
+    // __session is short-lived; __client persists across refreshes. Either
+    // one being present indicates an active Clerk session.
+    const [session, client] = await Promise.all([
+      chrome.cookies.get({ url: GEOSIGNAL_WEB_URL, name: '__session' }),
+      chrome.cookies.get({ url: GEOSIGNAL_WEB_URL, name: '__client' })
+    ]);
+    const token = session?.value || '';
+    const signedIn = !!(token || client?.value);
+    // Decode the JWT payload only to surface user-friendly identity bits.
+    // No signature check — this is display-only; server still verifies.
+    let userId = '';
+    if (token && token.split('.').length === 3) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        userId = payload.sub || '';
+      } catch {}
+    }
+    return { signedIn, token, userId };
+  } catch (err) {
+    console.warn('[GeoSignal] cookie read failed:', err.message);
+    return { signedIn: false, token: '', userId: '' };
+  }
+}
+
+async function initAuthRow() {
+  const statusEl = document.getElementById('auth-status');
+  const actionEl = document.getElementById('auth-action');
+  if (!statusEl || !actionEl) return;
+
+  const { signedIn, userId } = await readClerkSession();
+
+  if (signedIn) {
+    statusEl.textContent = userId
+      ? `Signed in · ${userId.slice(0, 12)}…`
+      : 'Signed in';
+    statusEl.classList.add('signed-in');
+    actionEl.textContent = 'Manage';
+    actionEl.classList.remove('hidden');
+    actionEl.onclick = () => chrome.tabs.create({ url: GEOSIGNAL_WEB_URL });
+    await chrome.storage.local.set({ gs_signed_in: true });
+  } else {
+    statusEl.textContent = 'Not signed in';
+    statusEl.classList.remove('signed-in');
+    actionEl.textContent = 'Sign in';
+    actionEl.classList.remove('hidden');
+    actionEl.onclick = () => chrome.tabs.create({ url: GEOSIGNAL_WEB_URL });
+    await chrome.storage.local.set({ gs_signed_in: false });
+  }
+}
 
 function showMainView(state, pageActive) {
   document.getElementById('tabs').classList.remove('hidden');

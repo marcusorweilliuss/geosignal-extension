@@ -14,6 +14,12 @@
         </button>
       </div>
       <div class="pop-sub" id="header-sub">Briefings for every page</div>
+      <!-- Single-line auth status. Reads __session cookie from the
+           GeoSignal web app to detect sign-in. -->
+      <div class="auth-row" id="auth-row">
+        <span class="auth-status" id="auth-status">Checking sign-in…</span>
+        <button class="btn-link auth-action hidden" id="auth-action"></button>
+      </div>
     </header>
 
     <!-- First-install overlay -->
