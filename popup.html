@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>GeoSignal</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header class="pop-header">
+      <div class="pop-header-row">
+        <div class="pop-brand">GeoSignal</div>
+        <button class="pop-profile-btn hidden" id="edit-profile-top" title="Edit profile">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </button>
+      </div>
+      <div class="pop-sub" id="header-sub">Briefings for every page</div>
+    </header>
+
+    <!-- First-install overlay -->
+    <section id="first-install" class="first-install hidden">
+      <div class="first-install-icon">🎉</div>
+      <div class="first-install-title">GeoSignal is installed!</div>
+      <div class="first-install-body">
+        Navigate to any news article and click this icon for an instant geopolitical briefing.
+      </div>
+      <button class="btn btn-primary" id="dismiss-first-install">Got it</button>
+    </section>
+
+    <!-- Tab bar (shown only after onboarding) -->
+    <nav class="tabs hidden" id="tabs">
+      <button class="tab-btn active" data-tab="insights">Insights</button>
+      <button class="tab-btn" data-tab="feed">Feed</button>
+    </nav>
+
+    <!-- ── Inactive page message ───────────────────── -->
+    <section id="inactive-msg" class="inactive-msg hidden">
+      <div class="inactive-icon">📰</div>
+      <div class="inactive-title">Not a news page</div>
+      <div class="inactive-body">
+        GeoSignal works on news articles and blog posts. Navigate to a
+        news article and click the icon to get your briefing.
+      </div>
+    </section>
+
+    <!-- ── Onboarding / Profile editor ────────────────── -->
+    <section id="onboarding" class="ob hidden">
+      <div class="ob-step" data-step="1">
+        <div class="ob-step-title" id="ob-title">Personalise GeoSignal</div>
+        <div class="ob-step-help">
+          Optional — helps tailor your insights. You can skip this entirely.
+        </div>
+        <div class="field">
+          <label for="occupation">Occupation</label>
+          <input id="occupation" type="text" placeholder="e.g. Research analyst" />
+        </div>
+        <div class="field">
+          <label for="company">Company (optional)</label>
+          <input id="company" type="text" placeholder="e.g. Deloitte, UN, Reuters" />
+        </div>
+        <div class="field">
+          <label>Sectors (select all that apply)</label>
+          <div class="sector-checks" id="sector-checks">
+            <label class="check-item"><input type="checkbox" value="Geopolitics"> Geopolitics</label>
+            <label class="check-item"><input type="checkbox" value="Economy &amp; Trade"> Economy &amp; Trade</label>
+            <label class="check-item"><input type="checkbox" value="Technology &amp; AI"> Technology &amp; AI</label>
+            <label class="check-item"><input type="checkbox" value="Climate &amp; Energy"> Climate &amp; Energy</label>
+            <label class="check-item"><input type="checkbox" value="Defence &amp; Security"> Defence &amp; Security</label>
+            <label class="check-item"><input type="checkbox" value="Society &amp; Culture"> Society &amp; Culture</label>
+            <label class="check-item"><input type="checkbox" value="Space &amp; Frontier"> Space &amp; Frontier</label>
+            <label class="check-item"><input type="checkbox" value="Health &amp; Biotech"> Health &amp; Biotech</label>
+          </div>
+        </div>
+        <div class="field">
+          <label for="country">Country</label>
+          <input id="country" type="text" placeholder="e.g. India" />
+        </div>
+        <div class="field">
+          <label for="concern">Primary concern</label>
+          <input id="concern" type="text" placeholder="e.g. Supply-chain risk in South Asia" />
+        </div>
+        <div class="ob-success hidden" id="profile-success">Profile saved! Your insights will update automatically.</div>
+        <div class="ob-actions">
+          <button class="btn btn-ghost" id="skip-onboarding">Skip</button>
+          <button class="btn btn-primary" id="finish">Save</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Insights ──────────────────────────────────── -->
+    <section id="insights" class="insights hidden">
+      <div class="stat-row">
+        <div class="stat-card">
+          <div class="stat-label">Articles this month</div>
+          <div class="stat-value" id="stat-count">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Reading streak</div>
+          <div class="stat-value">
+            <span id="stat-streak">0</span><span class="stat-unit">days</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Top regions</div>
+        <ul class="rank-list" id="top-regions"></ul>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Top sectors</div>
+        <ul class="rank-list" id="top-sectors"></ul>
+      </div>
+
+      <div class="section">
+        <div class="section-label">Most-read sources</div>
+        <ul class="rank-list" id="top-domains"></ul>
+      </div>
+
+      <div class="summary" id="summary-line"></div>
+
+      <div class="footer-row">
+        <button class="btn-link" id="edit-profile">Edit profile &amp; keys</button>
+        <button class="btn-link" id="clear-history">Clear history</button>
+      </div>
+    </section>
+
+    <!-- ── Feed ──────────────────────────────────────── -->
+    <section id="feed" class="feed hidden">
+      <div class="filter-group">
+        <div class="filter-group-label">Region</div>
+        <select class="region-select" id="feed-region"></select>
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-group-label">Sectors</div>
+        <div class="pill-row" id="feed-sectors"></div>
+      </div>
+
+      <div class="filter-group">
+        <div class="filter-group-label">Source type</div>
+        <div class="pill-row" id="feed-sources"></div>
+      </div>
+
+      <div class="feed-actions">
+        <button class="btn btn-primary" id="feed-refresh">Refresh feed</button>
+      </div>
+
+      <div id="feed-status" class="feed-state hidden"></div>
+      <div class="feed-list" id="feed-list"></div>
+    </section>
+
+    <!-- sources.js is CommonJS — shim `module` so it runs as a classic script. -->
+    <script src="module-shim.js"></script>
+    <script src="sources.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
