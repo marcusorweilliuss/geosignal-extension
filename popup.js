@@ -43,48 +43,52 @@ const REGION_LABELS = {
 // ── Boot ──
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Auth row is independent of onboarding — render it every open.
+  // Auth row + profile sync (when signed in) on every popup open.
   initAuthRow();
 
-  // Check if this is the very first time the extension is opened.
   const { gs_first_install_seen } = await chrome.storage.local.get('gs_first_install_seen');
+  const state = await chrome.storage.local.get([PROFILE_KEY, HISTORY_KEY]);
 
-  // Check if current tab is on a qualifying page.
-  let pageActive = true;
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      const resp = await chrome.runtime.sendMessage({ type: 'GEOSIGNAL_IS_PAGE_ACTIVE', tabId: tab.id });
-      pageActive = resp?.active ?? true;
-    }
-  } catch {}
-
-  const state = await chrome.storage.local.get([
-    ONBOARDED_KEY, PROFILE_KEY, 'groqApiKey', 'newsApiKey', HISTORY_KEY
-  ]);
-
-  // Show first-install overlay on very first open.
+  // First-open: show the welcome overlay with the upward pointer arrow.
   if (!gs_first_install_seen) {
+    document.getElementById('pointer-arrow').classList.add('visible');
     document.getElementById('first-install').classList.remove('hidden');
     document.getElementById('dismiss-first-install').addEventListener('click', async () => {
       await chrome.storage.local.set({ gs_first_install_seen: true });
+      document.getElementById('pointer-arrow').classList.remove('visible');
       document.getElementById('first-install').classList.add('hidden');
-      // Proceed to onboarding or insights.
-      if (!state[ONBOARDED_KEY]) {
-        startOnboarding(state);
-      } else {
-        showMainView(state, pageActive);
-      }
+      showInsightsView(state);
     });
     return;
   }
 
-  if (!state[ONBOARDED_KEY]) {
-    startOnboarding(state);
-  } else {
-    showMainView(state, pageActive);
-  }
+  showInsightsView(state);
 });
+
+function showInsightsView(state) {
+  document.getElementById('insights').classList.remove('hidden');
+  showInsights(state);
+  wireFooterLinks();
+}
+
+// Footer-row link wiring. "Edit profile" opens the web app where the
+// user can sign in and edit their profile via Clerk. "Clear history"
+// wipes the local reading history.
+function wireFooterLinks() {
+  const editBtn = document.getElementById('edit-profile');
+  if (editBtn) {
+    editBtn.onclick = () => chrome.tabs.create({ url: GEOSIGNAL_WEB_URL });
+  }
+  const clearBtn = document.getElementById('clear-history');
+  if (clearBtn) {
+    clearBtn.onclick = async () => {
+      if (!confirm('Clear your local reading history? This cannot be undone.')) return;
+      await chrome.storage.local.remove(HISTORY_KEY);
+      const fresh = await chrome.storage.local.get([PROFILE_KEY, HISTORY_KEY]);
+      showInsights(fresh);
+    };
+  }
+}
 
 // ── Profile sync with web app /api/profile ──
 // Extension profile shape: { occupation, company, sectors[], sector,
@@ -433,19 +437,8 @@ function showInsights(state) {
   document.getElementById('summary-line').textContent =
     buildSummaryLine(profile, monthEntries, sectorBag);
 
-  document.getElementById('edit-profile').addEventListener('click', async () => {
-    const full = await chrome.storage.local.get([
-      PROFILE_KEY, 'groqApiKey', 'newsApiKey'
-    ]);
-    startOnboarding(full);
-  });
-
-  document.getElementById('clear-history').addEventListener('click', async () => {
-    await chrome.storage.local.remove(HISTORY_KEY);
-    const fresh = await chrome.storage.local.get([PROFILE_KEY, HISTORY_KEY]);
-    document.getElementById('insights').innerHTML = ''; // re-render cleanly
-    location.reload();
-  });
+  // Footer-row buttons (edit-profile, clear-history) are wired by
+  // wireFooterLinks() in the boot path. No duplicate bindings here.
 }
 
 function topN(items, n) {

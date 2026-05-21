@@ -88,20 +88,77 @@ body {
 
 /* First-install overlay */
 .first-install {
-  text-align: center;
-  padding: 36px 24px 28px;
+  text-align: left;
+  padding: 24px 22px 26px;
 }
-.first-install-icon { font-size: 36px; margin-bottom: 12px; }
 .first-install-title {
-  font: 700 16px/1.3 var(--sans);
+  font: 700 17px/1.3 var(--sans);
   color: var(--ink);
-  margin-bottom: 8px;
+  text-align: center;
+  margin-bottom: 14px;
 }
 .first-install-body {
-  font: 400 13px/1.55 var(--sans);
-  color: var(--muted);
+  font: 400 13px/1.6 var(--sans);
+  color: var(--ink);
   margin-bottom: 16px;
 }
+.first-install-body p {
+  margin: 0 0 8px 0;
+}
+.first-install-body strong {
+  color: var(--accent);
+  font-weight: 700;
+  margin-right: 4px;
+}
+.first-install-tip {
+  font: 400 12px/1.5 var(--sans);
+  color: var(--muted);
+  background: var(--bg-soft, rgba(15,110,86,0.06));
+  border-left: 2px solid var(--accent);
+  padding: 10px 12px;
+  border-radius: 4px;
+  margin-bottom: 18px;
+}
+.inline-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font: 700 11px/1 var(--sans);
+  vertical-align: -3px;
+}
+
+/* Upward-pointing arrow above the popup header. The arrow head sits at
+   the very top edge of the popup, suggesting "look up there at the
+   Chrome toolbar icon you just clicked." */
+.pointer-arrow {
+  display: none;
+  position: absolute;
+  top: -2px;
+  right: 22px;
+  width: 24px;
+  pointer-events: none;
+  z-index: 100;
+}
+.pointer-arrow.visible { display: block; }
+.pointer-arrow-head {
+  width: 0; height: 0;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-bottom: 11px solid var(--accent);
+  margin: 0 auto;
+}
+.pointer-arrow-shaft {
+  width: 3px;
+  height: 22px;
+  background: var(--accent);
+  margin: 0 auto -1px;
+  border-radius: 2px;
+}
+body { position: relative; }
 
 /* ── Onboarding ──────────────────────────────────── */
 
