@@ -543,8 +543,10 @@ async function loadFeed(forceRefresh = false) {
   const DEFAULT_NEWS_KEY = '';
   const { newsApiKey } = await chrome.storage.local.get('newsApiKey');
   const activeNewsKey = newsApiKey || DEFAULT_NEWS_KEY;
-  if (!activeNewsKey) {
-    showFeedState('Add a NewsAPI key under Edit profile & keys to enable the Feed.');
+  // Either route is acceptable: signed-in (server pays) OR local key.
+  const sessionToken = await readClerkSessionToken();
+  if (!activeNewsKey && !sessionToken) {
+    showFeedState('Sign in to GeoSignal or add a NewsAPI key under Edit profile & keys to enable the Feed.');
     renderFeedCards([]);
     return;
   }
@@ -596,23 +598,53 @@ async function fetchNewsApi(regionSlug, apiKey) {
     q = `(${terms.join(' OR ')})`;
   }
 
-  const url = 'https://newsapi.org/v2/everything?' + new URLSearchParams({
-    q,
-    language: 'en',
-    sortBy: 'publishedAt',
-    pageSize: '40',
-    apiKey
-  }).toString();
-
-  const res = await fetch(url);
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`NewsAPI ${res.status}: ${body.slice(0, 120)}`);
+  // Signed-in path: server pays. Try the GeoSignal proxy first; if there's
+  // no session (returns null) or the proxy fails, fall back to the user's
+  // own NewsAPI key as before.
+  let articles = null;
+  try {
+    const token = await readClerkSessionToken();
+    if (token) {
+      const proxRes = await fetch(`${GEOSIGNAL_WEB_URL}/api/ext/news`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          q,
+          language: 'en',
+          sortBy: 'publishedAt',
+          pageSize: 40
+        })
+      });
+      const proxData = await proxRes.json().catch(() => ({}));
+      if (proxRes.ok && proxData.ok) articles = proxData.articles || [];
+    }
+  } catch (err) {
+    console.warn('[GeoSignal] news proxy failed, using local key:', err.message);
   }
-  const data = await res.json();
-  if (data.status !== 'ok') throw new Error(data.message || 'NewsAPI error');
 
-  return (data.articles || []).map(a => ({
+  if (!articles) {
+    if (!apiKey) throw new Error('Sign in to GeoSignal or add a NewsAPI key in settings');
+    const url = 'https://newsapi.org/v2/everything?' + new URLSearchParams({
+      q,
+      language: 'en',
+      sortBy: 'publishedAt',
+      pageSize: '40',
+      apiKey
+    }).toString();
+    const res = await fetch(url);
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`NewsAPI ${res.status}: ${body.slice(0, 120)}`);
+    }
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.message || 'NewsAPI error');
+    articles = data.articles || [];
+  }
+
+  return articles.map(a => ({
     title: a.title || '',
     url: a.url || '',
     description: a.description || '',
@@ -620,6 +652,17 @@ async function fetchNewsApi(regionSlug, apiKey) {
     domain: extractDomain(a.url || ''),
     rawSource: a.source?.name || ''
   })).filter(a => a.title && a.url && a.title !== '[Removed]');
+}
+
+// Read the Clerk __session cookie from the GeoSignal web app domain.
+// Same pattern as readClerkSession() but token-only for hot paths.
+async function readClerkSessionToken() {
+  try {
+    const c = await chrome.cookies.get({ url: GEOSIGNAL_WEB_URL, name: '__session' });
+    return c?.value || '';
+  } catch {
+    return '';
+  }
 }
 
 function extractDomain(url) {

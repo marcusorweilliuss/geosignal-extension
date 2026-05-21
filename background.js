@@ -20,12 +20,63 @@ const DEFAULT_PERPLEXITY_KEY = '';
 const PERPLEXITY_URL = 'https://api.perplexity.ai/chat/completions';
 const PERPLEXITY_MODEL = 'sonar';
 
+// GeoSignal web app — when the user is signed in there, the extension
+// forwards LLM/news requests through these endpoints so the server's
+// keys do the spending. Falls back to the user's local keys otherwise.
+const GEOSIGNAL_WEB_URL = 'https://geosignal-6ics.onrender.com';
+
+async function getServerSessionToken() {
+  try {
+    const c = await chrome.cookies.get({ url: GEOSIGNAL_WEB_URL, name: '__session' });
+    return c?.value || '';
+  } catch {
+    return '';
+  }
+}
+
+// Returns parsed JSON on success, null when there's no session (signed
+// out — caller should fall back to a direct API call). Throws on a real
+// server error so the caller surfaces it instead of silently downgrading.
+async function callServerProxy(path, body) {
+  const token = await getServerSessionToken();
+  if (!token) return null;
+  const res = await fetch(`${GEOSIGNAL_WEB_URL}/api/ext/${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify(body)
+  });
+  if (res.status === 401) {
+    // Session expired between cookie read and request. Treat as signed
+    // out so caller falls back to local keys.
+    return null;
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || `GeoSignal proxy ${res.status}`);
+  }
+  return data;
+}
+
 // ── Perplexity API call ──
 
 async function callPerplexity(messages, { temperature = 0.3, max_tokens = 500 } = {}) {
+  // Signed-in path: server pays. Server proxy returns null when there's
+  // no Clerk session, so we fall through to the user's own key below.
+  try {
+    const proxied = await callServerProxy('perplexity', { messages, temperature, max_tokens });
+    if (proxied) {
+      return { content: proxied.content || '', citations: proxied.citations || [] };
+    }
+  } catch (err) {
+    console.warn('[GeoSignal] perplexity proxy failed, using local key:', err.message);
+  }
+
   const { perplexityApiKey } = await chrome.storage.local.get('perplexityApiKey');
   const key = perplexityApiKey || DEFAULT_PERPLEXITY_KEY;
-  if (!key) throw new Error('No Perplexity API key');
+  if (!key) throw new Error('Sign in to GeoSignal or add a Perplexity API key in settings');
 
   const res = await fetch(PERPLEXITY_URL, {
     method: 'POST',
@@ -75,10 +126,6 @@ function getThinkTankDomains() {
 
 async function fetchThinkTankContext(headline) {
   try {
-    const { newsApiKey } = await chrome.storage.local.get('newsApiKey');
-    const key = newsApiKey || DEFAULT_NEWS_KEY;
-    if (!key) return [];
-
     // Extract 3-5 key terms from the headline for the search query.
     const stopWords = new Set(['the','a','an','in','on','at','to','for','of','and','or','is','are','was','were','by','with','from','as','its','has','have','had','that','this','but','not','be','been','will','would','can','could','may','over','after','into','new']);
     const terms = headline.split(/\s+/)
@@ -92,21 +139,42 @@ async function fetchThinkTankContext(headline) {
     // Build a domains parameter from think-tank sources (NewsAPI cap: 20 domains).
     const domainList = [...ttDomains].slice(0, 20).join(',');
 
-    const params = new URLSearchParams({
-      q: query,
-      domains: domainList,
-      language: 'en',
-      sortBy: 'relevancy',
-      pageSize: '5',
-      apiKey: key
-    });
+    // Signed-in path: server-side NewsAPI proxy. Returns the same article
+    // shape so the downstream mapping below is unchanged.
+    let articles = null;
+    try {
+      const proxied = await callServerProxy('news', {
+        q: query,
+        domains: domainList,
+        language: 'en',
+        sortBy: 'relevancy',
+        pageSize: 5
+      });
+      if (proxied) articles = proxied.articles || [];
+    } catch (err) {
+      console.warn('[GeoSignal] news proxy failed, using local key:', err.message);
+    }
 
-    const res = await fetch('https://newsapi.org/v2/everything?' + params);
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (data.status !== 'ok' || !data.articles) return [];
+    if (!articles) {
+      const { newsApiKey } = await chrome.storage.local.get('newsApiKey');
+      const key = newsApiKey || DEFAULT_NEWS_KEY;
+      if (!key) return [];
+      const params = new URLSearchParams({
+        q: query,
+        domains: domainList,
+        language: 'en',
+        sortBy: 'relevancy',
+        pageSize: '5',
+        apiKey: key
+      });
+      const res = await fetch('https://newsapi.org/v2/everything?' + params);
+      if (!res.ok) return [];
+      const data = await res.json();
+      if (data.status !== 'ok' || !data.articles) return [];
+      articles = data.articles;
+    }
 
-    return data.articles
+    return articles
       .filter(a => a.title && a.description)
       .slice(0, 3)
       .map(a => ({
@@ -234,6 +302,14 @@ WATCH FOR:
 // ── Groq call with model fallback ──
 
 async function callGroq(prompt, apiKey, { temperature = 0.4, max_tokens = 600 } = {}) {
+  // Signed-in path: server-side Groq with its own key rotation + fallback.
+  try {
+    const proxied = await callServerProxy('groq', { prompt, temperature, max_tokens });
+    if (proxied) return proxied.text || '';
+  } catch (err) {
+    console.warn('[GeoSignal] groq proxy failed, using local key:', err.message);
+  }
+
   const models = [GROQ_MODEL, GROQ_FALLBACK_MODEL];
   let lastError = null;
 
