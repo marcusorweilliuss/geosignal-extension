@@ -86,6 +86,94 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
+// ── Profile sync with web app /api/profile ──
+// Extension profile shape: { occupation, company, sectors[], sector,
+// country, concern }. Web app profile shape: { role, company, location,
+// industries[], customSectors[], keywords[], focus }. When syncing we
+// translate between the two and write both naming conventions so each
+// side reads what it expects.
+
+function mapServerToExtProfile(srv) {
+  const allSectors = []
+    .concat(Array.isArray(srv.sectors) ? srv.sectors : [])
+    .concat(Array.isArray(srv.industries) ? srv.industries : [])
+    .concat(Array.isArray(srv.customSectors) ? srv.customSectors : []);
+  const sectors = [...new Set(allSectors)].filter(Boolean);
+  return {
+    occupation: srv.occupation || srv.role || '',
+    company: srv.company || '',
+    country: srv.country || srv.location || 'Global',
+    concern: srv.concern || srv.focus || '',
+    sectors,
+    sector: sectors[0] || ''
+  };
+}
+
+function mapExtToServerProfile(ext) {
+  const sectors = Array.isArray(ext.sectors) ? ext.sectors : [];
+  return {
+    occupation: ext.occupation || '',
+    role: ext.occupation || '',
+    company: ext.company || '',
+    country: ext.country || 'Global',
+    location: ext.country || '',
+    sectors,
+    industries: sectors,
+    sector: ext.sector || sectors[0] || '',
+    concern: ext.concern || '',
+    focus: ext.concern || '',
+    keywords: Array.isArray(ext.keywords) ? ext.keywords : []
+  };
+}
+
+async function syncProfileFromServer() {
+  const token = await readClerkSessionToken();
+  if (!token) return;
+  try {
+    const res = await fetch(`${GEOSIGNAL_WEB_URL}/api/profile`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    const srvProfile = data.profile;
+    if (!srvProfile) {
+      // Server has nothing yet — push whatever the extension has up so
+      // the web app picks it up on the next sign-in there.
+      const { [PROFILE_KEY]: local } = await chrome.storage.local.get(PROFILE_KEY);
+      if (local) await syncProfileToServer(local);
+      return;
+    }
+    const mapped = mapServerToExtProfile(srvProfile);
+    const { [PROFILE_KEY]: local = {} } = await chrome.storage.local.get(PROFILE_KEY);
+    // Server-wins merge — the web app is the canonical source of truth
+    // once the user has set up a profile there.
+    const merged = { ...local, ...mapped };
+    await chrome.storage.local.set({
+      [PROFILE_KEY]: merged,
+      [ONBOARDED_KEY]: true
+    });
+  } catch (err) {
+    console.warn('[GeoSignal] profile pull failed:', err.message);
+  }
+}
+
+async function syncProfileToServer(profile) {
+  const token = await readClerkSessionToken();
+  if (!token) return;
+  try {
+    await fetch(`${GEOSIGNAL_WEB_URL}/api/profile`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ profile: mapExtToServerProfile(profile) })
+    });
+  } catch (err) {
+    console.warn('[GeoSignal] profile push failed:', err.message);
+  }
+}
+
 // ── Auth (Clerk session bridge with web app) ──
 // We can't run Clerk's JS SDK inside the popup (CSP + no bundler), so we
 // read the __session cookie that Clerk sets on the geosignal-6ics domain.
@@ -134,6 +222,10 @@ async function initAuthRow() {
     actionEl.classList.remove('hidden');
     actionEl.onclick = () => chrome.tabs.create({ url: GEOSIGNAL_WEB_URL });
     await chrome.storage.local.set({ gs_signed_in: true });
+    // Pull the latest profile from the web app so insights/scoring
+    // reflect what the user set up there. Fire-and-forget — popup keeps
+    // rendering whatever we already have if this is slow.
+    syncProfileFromServer().catch(() => {});
   } else {
     statusEl.textContent = 'Not signed in';
     statusEl.classList.remove('signed-in');
@@ -238,6 +330,9 @@ function startOnboarding(state, isEdit = false) {
       [PROFILE_KEY]: profile,
       [ONBOARDED_KEY]: true
     });
+    // Push the new profile up to the web app so it shows up there too
+    // on next sign-in / page reload. No-op when not signed in.
+    syncProfileToServer(profile).catch(() => {});
 
     if (!skipped) {
       // Show success message briefly.

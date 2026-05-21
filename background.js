@@ -637,42 +637,85 @@ How does this specifically affect this person? 3-4 bullet points, punchy and spe
   }
 
   // ── Perplexity: headline relevance for homepages ──
+  // Mirrors the web app's llmSelectAndRank methodology: explicit
+  // multi-dimensional matching (role, company, country, sectors,
+  // keywords, focus, plus reading-history affinity), generous on real
+  // overlaps, strict on tangential ones. NEVER manufacture a connection
+  // to the user's employer or country if the article doesn't reference it.
   if (msg?.type === 'GEOSIGNAL_PERPLEXITY_RELEVANCE') {
     (async () => {
       try {
-        const { gs_profile } = await chrome.storage.local.get('gs_profile');
+        const { gs_profile, gs_history } = await chrome.storage.local.get(['gs_profile', 'gs_history']);
         const profile = gs_profile || {};
-        const profileDesc = [
-          profile.occupation && `Role: ${profile.occupation}`,
-          profile.company && `Company: ${profile.company}`,
-          profile.sectors && `Sectors: ${(Array.isArray(profile.sectors) ? profile.sectors : [profile.sector]).join(', ')}`,
-          profile.country && `Based in: ${profile.country}`,
-          profile.concern && `Focus: ${profile.concern}`
-        ].filter(Boolean).join(' | ') || 'General reader';
+
+        // Compute behavioural patterns from local history (best-effort).
+        const history = Array.isArray(gs_history) ? gs_history : [];
+        const sectorBag = {};
+        const regionBag = {};
+        const sourceBag = {};
+        for (const h of history) {
+          if (h.sector) sectorBag[h.sector] = (sectorBag[h.sector] || 0) + 1;
+          if (h.region) regionBag[h.region] = (regionBag[h.region] || 0) + 1;
+          if (h.source) sourceBag[h.source] = (sourceBag[h.source] || 0) + 1;
+        }
+        const topN = (bag, n) => Object.entries(bag).sort((a, b) => b[1] - a[1]).slice(0, n).map(([k]) => k);
+        const topHistorySectors = topN(sectorBag, 3);
+        const topHistoryRegions = topN(regionBag, 2);
+        const topHistorySources = topN(sourceBag, 3);
+
+        // Build the same kind of multi-line context block the web app uses.
+        const sectors = Array.isArray(profile.sectors) && profile.sectors.length
+          ? profile.sectors
+          : (profile.sector ? [profile.sector] : []);
+        const keywords = Array.isArray(profile.keywords) ? profile.keywords : [];
+
+        const contextLines = [
+          `- Role / occupation: ${profile.occupation || 'Not specified'}`,
+          `- Company or organisation: ${profile.company || 'Not specified'}`,
+          `- Country they are based in: ${profile.country || 'Not specified'}`,
+          `- Sectors of interest: ${sectors.length ? sectors.join(', ') : 'Not specified'}`,
+          `- Keywords they track: ${keywords.length ? keywords.join(', ') : 'None'}`,
+          `- Other focus areas / concerns: ${profile.concern || 'Not specified'}`,
+          topHistorySectors.length ? `- Topics they engage with most (from reading history): ${topHistorySectors.join(', ')}` : '',
+          topHistoryRegions.length ? `- Regions they read about most: ${topHistoryRegions.join(', ')}` : '',
+          topHistorySources.length ? `- Go-to sources: ${topHistorySources.join(', ')}` : ''
+        ].filter(Boolean).join('\n');
 
         const headlines = msg.headlines || [];
         if (headlines.length === 0) { sendResponse({ ok: true, results: [] }); return; }
 
-        const headlineList = headlines.map((h, i) => `${i + 1}. ${h}`).join('\n');
+        // Compact numbered list — [n] keeps the response parseable.
+        const headlineList = headlines.map((h, i) => `[${i + 1}] ${String(h).slice(0, 220)}`).join('\n');
+
+        const systemPrompt = `You are a senior news editor curating a personalised reading list. Given a reader's profile and a list of headlines from a news homepage, pick the headlines GENUINELY RELEVANT to this specific reader — not popular, not buzzy — relevant.
+
+RELEVANCE DIMENSIONS — a headline is relevant if it MATERIALLY intersects any of:
+1. The reader's role or occupation (e.g. their job is affected by what the article describes)
+2. The reader's company or organisation (only if the article actually references it — never assume)
+3. The reader's country (a policy / economy / security / society event there)
+4. A sector they listed (must be a material connection, not a passing word)
+5. A tracked keyword (case-insensitive substring or close synonym)
+6. Their focus / concerns statement
+7. Behavioural patterns (regions/sectors/sources from their reading history)
+
+RANKING RULES:
+- Be GENEROUS on real overlaps. "Singapore economy" matches a reader following "Singapore"; "Bitcoin ETF" matches "crypto".
+- Be STRICT on tangential connections. Mere mention of a country or sector keyword in a list of others does NOT make the article relevant.
+- NEVER manufacture a tie to the reader's employer, university, or country if the article does not specifically reference it.
+- A headline that fits 2+ dimensions outranks one that fits 1.
+
+Return ONLY a JSON array (no prose, no code fences). One object per relevant headline:
+- "index": headline number (1-based)
+- "reason": short phrase (max 10 words) naming the SPECIFIC dimension(s) that matched, e.g. "Singapore policy + your fintech sector"
+- "score": 1-10 relevance score
+
+Include only headlines scoring 7 or above. Drop everything else. If nothing is genuinely relevant, return [].`;
 
         const messages = [
-          {
-            role: 'system',
-            content: `You are a news relevance engine. Given a reader profile and a list of headlines from a news homepage, identify which headlines are most relevant to this person's professional interests and concerns. Search the web briefly for context on the top stories if needed.
-
-Return a JSON array of objects — one per relevant headline — with these fields:
-- "index": the headline number (1-based)
-- "reason": a short phrase explaining why it's relevant to this person (max 10 words)
-- "score": relevance score 1-10
-
-Only include headlines scoring 5 or above. Return ONLY the JSON array, no other text.`
-          },
+          { role: 'system', content: systemPrompt },
           {
             role: 'user',
-            content: `READER PROFILE: ${profileDesc}
-
-HEADLINES:
-${headlineList}`
+            content: `READER PROFILE:\n${contextLines}\n\nHEADLINES:\n${headlineList}`
           }
         ];
 

@@ -1659,10 +1659,12 @@
         const matches = [];
         for (const r of resp.results) {
           const idx = (r.index || 0) - 1;
-          if (idx >= 0 && idx < headlines.length && (r.score || 0) >= 5) {
+          // Score threshold raised to 7 to match the new strict-relevance
+          // prompt — only genuinely-matching headlines get the "For you" pill.
+          if (idx >= 0 && idx < headlines.length && (r.score || 0) >= 7) {
             matches.push({
               ...headlines[idx],
-              score: (r.score || 5) * 10,
+              score: (r.score || 7) * 10,
               reason: r.reason || 'Relevant to your profile'
             });
           }
