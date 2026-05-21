@@ -201,43 +201,29 @@ function buildExpertBlock(thinkTankArticles) {
 
 function buildConcisePrompt({ title, source, text, url }, thinkTankArticles) {
   const articleContent = text || '';
-  const expertContext = buildExpertBlock(thinkTankArticles);
-  const hasTT = thinkTankArticles && thinkTankArticles.length > 0;
+  // Concise mode is intentionally austere — 3 single-sentence bullets,
+  // no expert/analyst section. Think-tank context (when fetched) is
+  // available to the detailed mode only.
 
-  const citationRule = hasTT
-    ? `- Every bullet MUST end with a citation tag: [Article] for the article, or [Source Name] for think-tank context (e.g. [Brookings], [Carnegie India]).
-- Place the tag at the very end of the bullet, after the final period.`
-    : `- Every bullet MUST end with [Article].
-- Place the tag at the very end of the bullet, after the final period.`;
+  return `You are a senior geopolitical intelligence analyst. Produce a VERY concise briefing — exactly three bullets, one sentence each. Plain text only — never use markdown bold (**) or italic. No filler. No vague language. Every bullet ends with [Article].
 
-  const expertBullet = hasTT
-    ? `\nEXPERT VIEW:
-- What a leading think tank or analyst would flag about this — cite the specific source. [Source Name]`
-    : '';
-
-  return `You are a senior geopolitical intelligence analyst. Produce a concise briefing — punchy but substantive. Each bullet should be one clear sentence with a specific fact or insight. Never use markdown bold (**) or italic formatting — plain text only. No filler or vague language.
+ANTI-SPECULATION RULE (CRITICAL):
+- Do NOT invent quotes or positions for organizations not mentioned in the article. Never write phrases like "X would likely argue" or "Y analysts would say". Only cite real statements that are actually in the source text.
 
 ARTICLE: ${title}
 SOURCE: ${source}
 TEXT: ${articleContent}
-${expertContext}
-CITATION RULES:
-${citationRule}
 
-Use EXACTLY this format. Use a dash (-) for bullets. Each bullet is one sentence — specific, factual, useful:
+Use EXACTLY this format. One dash bullet per section. Each bullet ONE sentence — specific, factual, useful:
 
 WHAT HAPPENED:
-- Name the specific actors, what they did, and when — include key figures or numbers. [Article]
-- What was decided, announced, or changed — be concrete. [Article]
+- The specific actors, action, and timing — name names and key numbers. [Article]
 
 WHY IT MATTERS:
-- The most important consequence or risk signal — name who is affected and how. [Article]
+- The most important consequence or risk signal — who is affected and how. [Article]
 
-CONTEXT:
-- The key preceding event or structural factor that makes this significant. [Article]
-${expertBullet}
 WATCH FOR:
-- The specific next trigger, deadline, or decision point to monitor. [Article]`;
+- The specific next trigger, deadline, or decision point. [Article]`;
 }
 
 function buildBriefingPrompt({ title, source, text, url }, thinkTankArticles) {
@@ -250,16 +236,23 @@ function buildBriefingPrompt({ title, source, text, url }, thinkTankArticles) {
     : '';
   const citationList = hasTT ? `[Article], ${ttNames}` : '[Article]';
 
+  // Only render the analyst section when we actually have real think-tank
+  // pieces fetched from NewsAPI. With no real context, omit the section
+  // entirely — never ask the LLM to speculate about what an organisation
+  // "would" say.
   const expertSection = hasTT
     ? `WHAT ANALYSTS & THINK TANKS ARE SAYING:
-- Cite a specific think-tank analysis, naming the institution and its key argument. Reference the expert context above. [Source Name]
-- A contrasting or complementary view from a different institution or regional analyst. [Source Name]
-- If the article itself quotes analysts, include their perspective. [Article]`
-    : `WHAT REGIONAL EXPERTS ARE SAYING:
-- Based on your knowledge of how major think tanks (Brookings, Carnegie, Chatham House, CSIS, Crisis Group, etc.) have analyzed this topic, what would their likely position be? Name the institution. [Article]
-- Any notable dissenting or contrarian view from a different school of thought. [Article]`;
+- Cite a specific think-tank analysis from the EXPERT CONTEXT block above. Name the institution and its actual key argument from that piece. [Source Name]
+- A contrasting or complementary view from a different institution listed in EXPERT CONTEXT. [Source Name]
+- If the article itself quotes analysts by name, include their perspective. [Article]`
+    : '';
 
   return `You are a senior geopolitical intelligence analyst. Produce a detailed, scannable briefing. Every bullet: one concrete insight, max one sentence. Never use markdown bold (**) or italic — plain text only. No filler, no vague language.
+
+ANTI-SPECULATION RULE (CRITICAL — NEVER VIOLATE):
+- Do NOT invent quotes, positions, or analyses for any organisation, think tank, or analyst that is not named in the source material or in the EXPERT CONTEXT block.
+- Phrases like "X would likely argue", "Y analysts would say", "Z would view this as" are FORBIDDEN. Only cite actual statements present in the inputs.
+- If you have no real source for an analyst view, omit that bullet entirely. Quality over completeness.
 
 ARTICLE: ${title}
 SOURCE: ${source}
@@ -615,7 +608,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const messages = [
           {
             role: 'system',
-            content: `You are a senior analyst. Produce a VERY SHORT personalised impact assessment — exactly 3-4 bullet points. Each bullet: one punchy sentence, max 20 words. Be specific — name exact mechanisms, numbers, policies, or market effects. No filler, no vague language. Never use markdown bold (**) or italic formatting. Use plain text only. Use dashes (-) for bullets. If you cite a source, put it in [brackets] at the end of the bullet.`
+            content: `You are a senior analyst. Produce a VERY SHORT personalised impact assessment — exactly 3-4 bullet points. Each bullet: one punchy sentence, max 20 words. Be specific — name exact mechanisms, numbers, policies, or market effects. No filler, no vague language. Never use markdown bold (**) or italic formatting. Use plain text only. Use dashes (-) for bullets.
+
+ANTI-SPECULATION RULE (CRITICAL): Do NOT invent quotes or positions for organisations or analysts. Never write "X would likely argue", "analysts would say", etc. Only cite real statements that you found via your web search. If you cite a source, put it in [brackets] at the end of the bullet — the bracket MUST correspond to a real source from your search, not a guessed institution name.`
           },
           {
             role: 'user',

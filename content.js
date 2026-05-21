@@ -1589,13 +1589,20 @@
       const safeTitle = h.text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const safeReason = h.reason.replace(/</g, '&lt;').replace(/>/g, '&gt;');
       item.innerHTML = `<div class="gs-sp-title">${safeTitle}</div><div class="gs-sp-reason">${safeReason}</div>`;
+      // Clicking a "Relevant for you" item opens the actual article in
+      // a new tab. Previously this just scrolled to the headline on the
+      // current page, which wasn't useful.
+      item.style.cursor = 'pointer';
       item.addEventListener('click', () => {
-        h.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const target = h.url || (h.element && h.element.href) || '';
+        if (target) {
+          window.open(target, '_blank', 'noopener');
+        } else {
+          // Fallback: if no URL was captured for some reason, scroll the
+          // headline into view so the user can click it themselves.
+          h.element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
         summaryPanel.classList.remove('gs-open');
-        // Pulse the pill.
-        pill.classList.remove('gs-pulse');
-        void pill.offsetWidth; // reflow
-        pill.classList.add('gs-pulse');
       });
       spList.appendChild(item);
     }
