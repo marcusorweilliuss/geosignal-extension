@@ -65,18 +65,24 @@ async function callServerProxy(path, body) {
 async function callPerplexity(messages, { temperature = 0.3, max_tokens = 500 } = {}) {
   // Signed-in path: server pays. Server proxy returns null when there's
   // no Clerk session, so we fall through to the user's own key below.
+  let proxyErr = null;
   try {
     const proxied = await callServerProxy('perplexity', { messages, temperature, max_tokens });
     if (proxied) {
       return { content: proxied.content || '', citations: proxied.citations || [] };
     }
   } catch (err) {
-    console.warn('[GeoSignal] perplexity proxy failed, using local key:', err.message);
+    proxyErr = err;
+    console.warn('[GeoSignal] perplexity proxy failed:', err.message);
   }
 
   const { perplexityApiKey } = await chrome.storage.local.get('perplexityApiKey');
   const key = perplexityApiKey || DEFAULT_PERPLEXITY_KEY;
-  if (!key) throw new Error('Sign in to GeoSignal or add a Perplexity API key in settings');
+  if (!key) {
+    throw new Error(proxyErr
+      ? `GeoSignal server unreachable (${proxyErr.message}). Try again in a moment.`
+      : 'Sign in to GeoSignal at geosignal-6ics.onrender.com to enable briefings.');
+  }
 
   const res = await fetch(PERPLEXITY_URL, {
     method: 'POST',
@@ -296,11 +302,22 @@ WATCH FOR:
 
 async function callGroq(prompt, apiKey, { temperature = 0.4, max_tokens = 600 } = {}) {
   // Signed-in path: server-side Groq with its own key rotation + fallback.
+  let proxyErr = null;
   try {
     const proxied = await callServerProxy('groq', { prompt, temperature, max_tokens });
     if (proxied) return proxied.text || '';
   } catch (err) {
-    console.warn('[GeoSignal] groq proxy failed, using local key:', err.message);
+    proxyErr = err;
+    console.warn('[GeoSignal] groq proxy failed:', err.message);
+  }
+
+  // Proxy returned null (no session cookie) or threw. If the user also
+  // hasn't pasted a local key, don't confuse them with a Groq 401 —
+  // tell them plainly what's wrong.
+  if (!apiKey) {
+    throw new Error(proxyErr
+      ? `GeoSignal server unreachable (${proxyErr.message}). Try again in a moment.`
+      : 'Sign in to GeoSignal at geosignal-6ics.onrender.com to enable briefings.');
   }
 
   const models = [GROQ_MODEL, GROQ_FALLBACK_MODEL];
