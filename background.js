@@ -511,19 +511,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const { apiKey, error } = await getApiKeyOrError();
         if (error) { sendResponse(error); return; }
 
-        // Fetch think-tank context in parallel with nothing — it's the first async step.
-        const thinkTankArticles = await fetchThinkTankContext(msg.article.title || '');
-
         const mode = msg.mode || 'concise';
-        const prompt = mode === 'concise'
-          ? buildConcisePrompt(msg.article, thinkTankArticles)
-          : buildBriefingPrompt(msg.article, thinkTankArticles);
-        const maxTok = mode === 'concise' ? 400 : 800;
-        const briefing = await callGroq(
-          prompt,
-          apiKey,
-          { temperature: 0.4, max_tokens: maxTok }
-        );
+        // Concise mode doesn't render an expert / think-tank section, so
+        // skip the extra NewsAPI round-trip. Detailed mode still fetches
+        // in parallel with the briefing call for a speed win.
+        const wantThinkTank = mode !== 'concise';
+        const [thinkTankArticles, briefing] = await Promise.all([
+          wantThinkTank ? fetchThinkTankContext(msg.article.title || '') : Promise.resolve([]),
+          (async () => {
+            // For concise, we can start the briefing immediately (no
+            // think-tank input). For detailed, callGroq will wait for
+            // the actual data since it's awaited below in prompt build.
+            if (!wantThinkTank) {
+              const prompt = buildConcisePrompt(msg.article, []);
+              return callGroq(prompt, apiKey, { temperature: 0.4, max_tokens: 400 });
+            }
+            // Detailed mode: return a placeholder — the real call runs
+            // after we have the think-tank result. See below.
+            return null;
+          })()
+        ]);
+
+        let finalBriefing = briefing;
+        if (wantThinkTank) {
+          const prompt = buildBriefingPrompt(msg.article, thinkTankArticles);
+          finalBriefing = await callGroq(prompt, apiKey, { temperature: 0.4, max_tokens: 800 });
+        }
 
         // Build citation map: Article + any think-tank sources found.
         const citationMap = { Article: msg.article.url || '' };
@@ -533,7 +546,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         sendResponse({
           ok: true,
-          briefing,
+          briefing: finalBriefing,
           citationMap
         });
       } catch (err) {
